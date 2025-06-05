@@ -1,51 +1,61 @@
 import streamlit as st
 import os
+from dotenv import load_dotenv
 from validators import apply_validator
 from llmclient import get_llm_call_fn
 
-# === Configuração do Streamlit ===
-st.set_page_config(page_title="Validador Inteligente de Formulários", layout="centered")
-st.title("Validador de Dados com LLM")
+load_dotenv()
 
-# === Sidebar para configuração do modelo ===
+st.set_page_config(page_title="Validador Inteligente de Formulários", layout="centered")
+st.title("Formulário com Validação Inteligente")
+
 st.sidebar.header("Configuração do LLM")
-provider = st.sidebar.selectbox("Provedor", ["stub", "openai", "ollama"])
+provider = st.sidebar.selectbox("Provedor", ["openai", "ollama", "stub"])
 
 model = st.sidebar.text_input("Modelo", value="gpt-3.5-turbo" if provider == "openai" else "llama3-70b-8192")
 temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.1, 0.05)
 
-api_key = st.sidebar.text_input("API Key (OpenAI)", type="password")
+api_key_input = st.sidebar.text_input("API Key (OpenAI)", type="password")
+api_key = api_key_input or os.getenv("OPENAI_API_KEY")
+
 base_url = st.sidebar.text_input("Base URL (OpenAI ou Ollama)", value="https://api.openai.com/v1" if provider == "openai" else "http://localhost:11434")
+if not api_key_input:
+    st.sidebar.info("Usando chave da variável de ambiente (OPENAI_API_KEY).")
 
-# === Entrada do usuário ===
-st.subheader("Dados do Formulário")
-campo = st.selectbox("Campo para validação", ["nome_completo", "email", "profissao", "endereco"])
-texto = st.text_input("Texto a ser validado")
+st.subheader("Preencha seus dados")
 
-if st.button("Validar"):
-    with st.spinner("Validando..."):
-        try:
-            call_fn = get_llm_call_fn(
-                provider,
-                model=model,
-                temperature=temperature,
-                api_key=api_key,
-                base_url=base_url,
-                host=base_url
-            ) if provider != "stub" else get_llm_call_fn("stub")
+form_data = {}
+campos = {
+    "nome_completo": "Nome completo",
+    "email": "E-mail",
+    "profissao": "Profissão",
+    "endereco": "Endereço"
+}
 
-            result = apply_validator(campo, texto, llm_call_fn=call_fn)
+call_fn = get_llm_call_fn(
+    provider,
+    model=model,
+    temperature=temperature,
+    api_key=api_key,
+    base_url=base_url,
+    host=base_url
+) if provider != "stub" else get_llm_call_fn("stub")
 
-            if result:
-                st.markdown("---")
-                col1, col2 = st.columns(2)
-                col1.metric("Original", "Válido" if result["is_original_valid"] else "Inválido")
-
-                if result["corrected"] and result["corrected"].strip() != texto.strip():
-                    col2.metric("Corrigido", "Válido" if result["is_corrected_valid"] else "Inválido")
-                    st.warning(f"Você não quis dizer: **{result['corrected']}**?")
-                else:
-                    st.success("Parece que o conteúdo está correto!")
-
-        except Exception as e:
-            st.error(f"Erro ao validar: {e}")
+for campo, label in campos.items():
+    with st.container():
+        st.write(f"### {label}")
+        user_input = st.text_input(f"{label}", key=campo)
+        if st.button(f"Validar {label}", key=f"btn_{campo}"):
+            with st.spinner("Validando..."):
+                result = apply_validator(campo, user_input, llm_call_fn=call_fn)
+                if result:
+                    if result["is_original_valid"]:
+                        st.success("Campo válido!")
+                        if result["corrected"] and result["corrected"].strip() != user_input.strip():
+                            st.info(f"O conteúdo está válido, mas você quis dizer: **{result['corrected']}**?")
+                    else:
+                        st.error("Campo inválido.")
+                        if result["corrected"] and result["corrected"].strip() != user_input.strip():
+                            st.warning(f"Você não quis dizer: **{result['corrected']}**?")
+                        else:
+                            st.info("Não foram encontradas sugestões para correção.")
