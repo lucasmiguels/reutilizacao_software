@@ -8,24 +8,21 @@ load_dotenv()
 # === Registro global de validadores ===
 VALIDATOR_REGISTRY = {}
 
-BASE_DIR = Path(__file__).resolve().parent  # pasta src/
+BASE_DIR = Path(__file__).resolve().parent
+PROMPT_DIR = BASE_DIR / "prompts"
 
-PRESET_PROMPT_PATHS = {
-    "email": BASE_DIR / "prompts" / "email",
-    "profissao": BASE_DIR / "prompts" / "profissão",  # cuidado com acento
-    "endereco": BASE_DIR / "prompts" / "endereco",  # cuidado com acento
-    "nome_completo": BASE_DIR / "prompts" / "nome_completo",  # cuidado com acento
+# Mapeamento automático das pastas de prompts
+PRESET_PROMPT_PATHS = {}
+for subdir in PROMPT_DIR.iterdir():
+    if subdir.is_dir():
+        PRESET_PROMPT_PATHS[subdir.name] = subdir
 
-
-}
-
-
+# === Decorator de registro ===
 def register_validator(name):
     def decorator(cls):
         VALIDATOR_REGISTRY[name] = cls
         return cls
     return decorator
-
 
 class BaseFieldValidator:
     def __init__(self, llm_call_fn=None, prompt_paths=None):
@@ -73,13 +70,14 @@ class BaseFieldValidator:
 # === Validadores com registro automático ===
 # Uso de decorators aberto e fechado e single responsability
 
+
 @register_validator("email")
 class EmailValidator(BaseFieldValidator):
     REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 
     def validate(self, text: str) -> bool:
         return bool(self.REGEX.match(text.strip()))
-
+    
 
 @register_validator("nome_completo")
 class NomeCompletoValidator(BaseFieldValidator):
@@ -125,12 +123,19 @@ class EnderecoValidator(BaseFieldValidator):
         return any(c.isdigit() for c in clean) and len(clean) > 5
     
 
-
+@register_validator("generic")
+class GenericValidator(BaseFieldValidator):
+    def validate(self, text: str) -> bool:
+        return bool(text.strip())
 
 # === Função de uso genérico ===
 def apply_validator(campo: str, texto: str, llm_call_fn=None, prompt_paths=None):
     try:
-        cls = VALIDATOR_REGISTRY.get(campo)
+        if campo not in VALIDATOR_REGISTRY:
+            cls = VALIDATOR_REGISTRY.get("generic")
+        else:
+            cls = VALIDATOR_REGISTRY.get(campo)
+            
         if not cls:
             print(f"Validador '{campo}' não registrado.")
             return
